@@ -1,34 +1,33 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Chat Room</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css')}}"></link>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.1.3/socket.io.js"></script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chat Room | Chat Site</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
     <script>
         var socket = io();
         let username;
         let roomName;
         let typingTimer;
-        const TYPING_INTERVAL = 500; // Half a second
-        let selectedRecipient = null; // Track selected user for private message
+        const TYPING_INTERVAL = 500;
+        let selectedRecipient = null;
 
         socket.on('connect', function() {
             console.log('Connected to the server!');
 
-            // Extract username from URL
             const urlParams = new URLSearchParams(window.location.search);
             username = urlParams.get('username');
             sessionStorage.setItem('chatUsername', username);
 
-            // Prompt the user to enter the chat room name
             roomName = prompt('Enter chat room name:');
             if (roomName) {
                 socket.emit('join_room', { username: username, room: roomName });
-                document.getElementById('roomNameDisplay').textContent = 'Chat Room: ' + roomName;
+                document.getElementById('roomNameDisplay').textContent = roomName;
             } else {
                 alert('Please enter a chat room name.');
-                // Redirect to the homepage so user can login again
-                window.location.href = '/'
+                window.location.href = '/';
             }
         });
 
@@ -41,7 +40,7 @@
         });
 
         socket.on('new_message', function(data) {
-            displayMessage(data.sender, data.message, data.private); // Pass the private flag
+            displayMessage(data.sender, data.message, data.private);
         });
 
         socket.on('user_list_update', function(userList) {
@@ -60,14 +59,12 @@
             const messageInput = document.getElementById('messageInput');
             const message = messageInput.value.trim();
             if (message && username && roomName) {
-                let isPrivate = false;
                 if (selectedRecipient) {
-                    isPrivate = true;
                     socket.emit('send_message', {
                         message: message,
                         room: roomName,
                         recipient: selectedRecipient,
-                        private: true // Indicate a private message
+                        private: true
                     });
                 } else {
                     socket.emit('send_message', { message: message, room: roomName, private: false });
@@ -80,9 +77,17 @@
         function displayMessage(sender, message, isPrivate) {
             const messagesList = document.getElementById('messages');
             const li = document.createElement('li');
-            li.innerHTML = sender + ': ' + message;
 
-            // Add class based on sender
+            const senderLabel = document.createElement('strong');
+            senderLabel.textContent = sender + ': ';
+
+            const messageBody = document.createElement('span');
+            // `message` is markdown rendered server-side; preserve intended formatting.
+            messageBody.innerHTML = message;
+
+            li.appendChild(senderLabel);
+            li.appendChild(messageBody);
+
             if (sender === sessionStorage.getItem('chatUsername')) {
                 li.classList.add('sent');
             } else {
@@ -91,28 +96,25 @@
 
             if (isPrivate) {
                 li.classList.add('private');
-                if(sender === sessionStorage.getItem('chatUsername')) {
-                     li.classList.add('sent')
-                } else {
-                    li.classList.add('received')
-                }
             }
 
             messagesList.appendChild(li);
-             messagesList.scrollTop = messagesList.scrollHeight;
+            messagesList.scrollTop = messagesList.scrollHeight;
         }
 
         function updateUserList(userList) {
             const userListElement = document.getElementById('userList');
-            userListElement.innerHTML = ''; // Clear the existing list
+            userListElement.innerHTML = '';
+
             for (const usernameInList in userList) {
-                if (userList.hasOwnProperty(usernameInList) && usernameInList !== username) { // Exclude current user
+                if (Object.prototype.hasOwnProperty.call(userList, usernameInList) && usernameInList !== username) {
                     const status = userList[usernameInList];
                     const li = document.createElement('li');
+                    li.dataset.username = usernameInList;
                     li.textContent = usernameInList + ' (' + status + ')';
                     li.addEventListener('click', function() {
                         selectRecipient(usernameInList);
-                    }); // Add click event to select recipient
+                    });
                     userListElement.appendChild(li);
                 }
             }
@@ -146,46 +148,69 @@
 
         function selectRecipient(recipient) {
             selectedRecipient = recipient;
-            document.getElementById('privateIndicator').textContent = "Private Message with " + recipient;
-            //alert("Now messaging " + recipient + " privately");
+            document.getElementById('privateIndicator').textContent = 'Private message with ' + recipient;
+
+            const allUsers = document.querySelectorAll('#userList li');
+            allUsers.forEach(function(userItem) {
+                userItem.classList.remove('selected');
+                if (userItem.dataset.username === recipient) {
+                    userItem.classList.add('selected');
+                }
+            });
         }
+
         window.onload = function() {
-             const messagesList = document.getElementById('messages');
-               messagesList.scrollTop = messagesList.scrollHeight;
-         };
+            const messagesList = document.getElementById('messages');
+            messagesList.scrollTop = messagesList.scrollHeight;
+        };
 
         function quitChat() {
-            // Send a message to the server to delete the user and then redirect
-            socket.emit('quit_chat', {username: username});
-            window.location.href = '/'; // Redirect to the login page
+            socket.emit('quit_chat', { username: username });
+            window.location.href = '/';
         }
 
     </script>
 </head>
-<body>
-    <h1>Chat Room</h1>
-    <div id="roomNameDisplay"></div>
+<body class="chat-page">
+    <header class="chat-header">
+        <div>
+            <p class="eyebrow">Connected as <span id="usernameDisplay"></span></p>
+            <h1>Chat Room</h1>
+        </div>
+        <div class="room-pill">Room: <span id="roomNameDisplay">—</span></div>
+    </header>
 
     <div id="chatContainer">
-        <ul id="userList"></ul>
-        <div id="chatBox">
-            <div id="privateIndicator"></div>
-            <div id="inputArea">
-                <input
-                  type="text"
-                  id="messageInput"
-                  oninput="startTyping()"
-                  onkeydown="if (event.keyCode == 13) { sendMessage(); return false; }"
-                />
-                <button id="sendButton" onclick="sendMessage()">Send</button>
-                 <button id="quitButton" onclick="quitChat()">Quit</button>
+        <aside class="panel users-panel">
+            <h2>Online Users</h2>
+            <p class="panel-note">Select a user to send a private message.</p>
+            <ul id="userList"></ul>
+        </aside>
+
+        <section id="chatBox" class="panel">
+            <div class="chat-toolbar">
+                <div id="privateIndicator">Public chat</div>
+                <button id="quitButton" onclick="quitChat()">Quit</button>
             </div>
 
+            <ul id="messages"></ul>
             <div id="typingIndicator"></div>
 
-            <h2>Messages:</h2>
-            <ul id="messages"></ul>
-        </div>
+            <div id="inputArea">
+                <input
+                    type="text"
+                    id="messageInput"
+                    placeholder="Write a message..."
+                    oninput="startTyping()"
+                    onkeydown="if (event.keyCode == 13) { sendMessage(); return false; }"
+                />
+                <button id="sendButton" onclick="sendMessage()">Send</button>
+            </div>
+        </section>
     </div>
+
+    <script>
+        document.getElementById('usernameDisplay').textContent = new URLSearchParams(window.location.search).get('username') || 'guest';
+    </script>
 </body>
 </html>
