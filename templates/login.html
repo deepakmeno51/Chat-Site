@@ -83,6 +83,10 @@
             window.location.href = '/chat?username=' + encodeURIComponent(data.username);
         });
 
+        socket.on('register_error', function(data) {
+            displayError(data.message || 'Unable to register.');
+        });
+
         function register() {
             const usernameInput = document.getElementById('usernameInput');
             const username = usernameInput.value.trim();

@@ -182,4 +182,4 @@ def handle_stopped_typing(data):
     emit('stopped_typing', {'username': username}, room=room, include_self=False)  # Broadcast
 
 if __name__ == '__main__':
-    socketio.run(app, debug=True, host='0.0.0.0')
+    socketio.run(app, debug=True)

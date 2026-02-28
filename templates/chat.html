@@ -36,6 +36,10 @@
             console.log('Disconnected from the server.');
         });
 
+        socket.on('register_error', function(data) {
+            alert(data.message || 'Server error');
+        });
+
         socket.on('new_message', function(data) {
             displayMessage(data.sender, data.message, data.private); // Pass the private flag
         });
