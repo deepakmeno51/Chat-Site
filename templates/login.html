@@ -9,62 +9,43 @@
     <script>
         var socket = io();
 
-        socket.on('connect', function() {
-            console.log('Connected to the server!');
-        });
-
-        socket.on('disconnect', function() {
-            console.log('Disconnected from the server.');
-            displayError('Disconnected from server. Please refresh.');
-        });
-        
-        socket.on('connect_error', function(err) {
-            console.error('Socket connection failed:', err);
-            displayError('Unable to connect to chat server.');
-        });
+        socket.on('connect', function() { console.log('Connected!'); });
+        socket.on('disconnect', function() { displayError('Disconnected. Please refresh.'); });
+        socket.on('connect_error', function() { displayError('Unable to connect to chat server.'); });
 
         socket.on('login_success', function(data) {
             window.location.href = '/chat?username=' + encodeURIComponent(data.username);
         });
-
-        // Maintained 'login_error' to match your Python backend updates
         socket.on('login_error', function(data) {
             displayError(data.error || 'Unable to register.');
+            setLoading(false);
         });
 
         function register() {
-            const usernameInput = document.getElementById('usernameInput');
-            const username = usernameInput.value.trim();
-            
-            if (!socket.connected) {
-                displayError('Still connecting to server. Please try again.');
-                return;
-            }
-
-            if (username) {
-                socket.emit('register', { username: username });
-                hideError();
-            } else {
-                displayError('Please enter a username.');
-            }
+            const username = document.getElementById('usernameInput').value.trim();
+            if (!socket.connected) { displayError('Still connecting. Please try again.'); return; }
+            if (!username) { displayError('Please enter a username.'); return; }
+            if (username.length > 30) { displayError('Username must be 30 characters or fewer.'); return; }
+            hideError();
+            setLoading(true);
+            socket.emit('register', { username: username });
         }
 
-        function displayError(message) {
-            const errorDiv = document.getElementById('errorDisplay');
-            errorDiv.textContent = message;
-            errorDiv.style.display = 'block';
+        function setLoading(on) {
+            const btn = document.getElementById('enterBtn');
+            btn.disabled = on;
+            btn.textContent = on ? 'Connecting\u2026' : 'Enter Chat';
         }
 
-        function hideError() {
-            const errorDiv = document.getElementById('errorDisplay');
-            errorDiv.style.display = 'none';
+        function displayError(msg) {
+            const el = document.getElementById('errorDisplay');
+            el.textContent = msg;
+            el.style.display = 'block';
         }
+        function hideError() { document.getElementById('errorDisplay').style.display = 'none'; }
 
-        document.addEventListener('keydown', function(event) {
-            if (event.key === 'Enter') {
-                event.preventDefault();
-                register();
-            }
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); register(); }
         });
     </script>
 </head>
@@ -74,12 +55,10 @@
             <p class="eyebrow">Realtime Messaging</p>
             <h1>Welcome to Chat Site</h1>
             <p class="subtitle">Pick a username to jump into a room and start chatting instantly.</p>
-
             <label for="usernameInput">Username</label>
-            <input type="text" id="usernameInput" placeholder="e.g. codex_dev" autocomplete="off" />
-
-            <button onclick="register()">Enter Chat</button>
-            <div id="errorDisplay" role="alert" style="display: none;"></div>
+            <input type="text" id="usernameInput" placeholder="e.g. codex_dev" autocomplete="off" maxlength="30" />
+            <button id="enterBtn" onclick="register()">Enter Chat</button>
+            <div id="errorDisplay" role="alert" style="display:none;"></div>
         </section>
     </main>
 </body>

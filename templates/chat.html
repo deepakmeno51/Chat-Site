@@ -11,36 +11,62 @@
         let username;
         let roomName;
         let typingTimer;
-        const TYPING_INTERVAL = 500;
+        const TYPING_INTERVAL = 800;
         let selectedRecipient = null;
 
-        socket.on('connect', function() {
-            console.log('Connected to the server!');
+        // --- Room Entry Modal ---
+        function openRoomModal() {
+            document.getElementById('roomModal').style.display = 'flex';
+            document.getElementById('roomInput').focus();
+        }
 
-            const urlParams = new URLSearchParams(window.location.search);
-            username = urlParams.get('username');
-            sessionStorage.setItem('chatUsername', username);
+        function joinFromModal() {
+            const roomInput = document.getElementById('roomInput');
+            const room = roomInput.value.trim();
+            if (!room) {
+                document.getElementById('roomInputError').textContent = 'Please enter a room name.';
+                return;
+            }
+            if (room.length > 50) {
+                document.getElementById('roomInputError').textContent = 'Room name must be 50 characters or fewer.';
+                return;
+            }
+            document.getElementById('roomModal').style.display = 'none';
+            roomName = room;
+            document.getElementById('roomNameDisplay').textContent = roomName;
+            socket.emit('join_room', { username: username, room: roomName });
+        }
 
-            roomName = prompt('Enter chat room name:');
-            if (roomName) {
-                socket.emit('join_room', { username: username, room: roomName });
-                document.getElementById('roomNameDisplay').textContent = roomName;
-            } else {
-                alert('Please enter a chat room name.');
-                window.location.href = '/';
+        document.addEventListener('keydown', function(e) {
+            const modal = document.getElementById('roomModal');
+            if (modal && modal.style.display === 'flex' && e.key === 'Enter') {
+                e.preventDefault();
+                joinFromModal();
             }
         });
 
-        socket.on('disconnect', function() {
-            console.log('Disconnected from the server.');
+        // --- Socket Events ---
+        socket.on('connect', function() {
+            console.log('Connected!');
+            const urlParams = new URLSearchParams(window.location.search);
+            username = urlParams.get('username');
+            // FIX: Set username display properly on connect
+            document.getElementById('usernameDisplay').textContent = username || 'guest';
+            sessionStorage.setItem('chatUsername', username);
+            openRoomModal();
         });
 
-        socket.on('register_error', function(data) {
-            alert(data.message || 'Server error');
+        socket.on('disconnect', function() {
+            console.log('Disconnected from server.');
+        });
+
+        socket.on('room_error', function(data) {
+            document.getElementById('roomInputError').textContent = data.error || 'Room error.';
+            openRoomModal();
         });
 
         socket.on('new_message', function(data) {
-            displayMessage(data.sender, data.message, data.private);
+            displayMessage(data.sender, data.message, data.private, data.recipient);
         });
 
         socket.on('user_list_update', function(userList) {
@@ -52,51 +78,70 @@
         });
 
         socket.on('stopped_typing', function(data) {
-            clearTypingIndicator(data.username);
+            clearTypingIndicator();
         });
 
+        // --- Messaging ---
         function sendMessage() {
             const messageInput = document.getElementById('messageInput');
             const message = messageInput.value.trim();
-            if (message && username && roomName) {
-                if (selectedRecipient) {
-                    socket.emit('send_message', {
-                        message: message,
-                        room: roomName,
-                        recipient: selectedRecipient,
-                        private: true
-                    });
-                } else {
-                    socket.emit('send_message', { message: message, room: roomName, private: false });
-                }
-                messageInput.value = '';
-                stoppedTyping();
+            if (!message || !username || !roomName) return;
+            if (message.length > 2000) {
+                alert('Message is too long (max 2000 characters).');
+                return;
             }
+
+            if (selectedRecipient) {
+                socket.emit('send_message', {
+                    message: message,
+                    room: roomName,
+                    recipient: selectedRecipient,
+                    private: true
+                });
+            } else {
+                socket.emit('send_message', { message: message, room: roomName, private: false });
+            }
+            messageInput.value = '';
+            stoppedTyping();
         }
 
-        function displayMessage(sender, message, isPrivate) {
+        function displayMessage(sender, message, isPrivate, recipient) {
             const messagesList = document.getElementById('messages');
             const li = document.createElement('li');
 
-            const senderLabel = document.createElement('strong');
-            senderLabel.textContent = sender + ': ';
+            const header = document.createElement('div');
+            header.className = 'msg-header';
 
-            const messageBody = document.createElement('span');
-            // `message` is markdown rendered server-side; preserve intended formatting.
+            const senderLabel = document.createElement('span');
+            senderLabel.className = 'msg-sender';
+            senderLabel.textContent = sender;
+
+            header.appendChild(senderLabel);
+
+            if (isPrivate) {
+                const badge = document.createElement('span');
+                badge.className = 'private-badge';
+                badge.textContent = recipient ? '\u{1F512} to ' + recipient : '\u{1F512} private';
+                header.appendChild(badge);
+            }
+
+            const messageBody = document.createElement('div');
+            messageBody.className = 'msg-body';
             messageBody.innerHTML = message;
 
-            li.appendChild(senderLabel);
+            li.appendChild(header);
             li.appendChild(messageBody);
 
-            if (sender === sessionStorage.getItem('chatUsername')) {
+            const me = sessionStorage.getItem('chatUsername');
+            if (sender === me) {
                 li.classList.add('sent');
+            } else if (sender === 'System') {
+                li.classList.add('system');
             } else {
                 li.classList.add('received');
             }
 
-            if (isPrivate) {
-                li.classList.add('private');
-            }
+            if (isPrivate) li.classList.add('private');
 
             messagesList.appendChild(li);
             messagesList.scrollTop = messagesList.scrollHeight;
@@ -106,28 +151,63 @@
             const userListElement = document.getElementById('userList');
             userListElement.innerHTML = '';
 
-            for (const usernameInList in userList) {
-                if (Object.prototype.hasOwnProperty.call(userList, usernameInList) && usernameInList !== username) {
-                    const status = userList[usernameInList];
-                    const li = document.createElement('li');
-                    li.dataset.username = usernameInList;
-                    li.textContent = usernameInList + ' (' + status + ')';
-                    li.addEventListener('click', function() {
-                        selectRecipient(usernameInList);
-                    });
-                    userListElement.appendChild(li);
-                }
+            const others = Object.keys(userList).filter(u => u !== username);
+            if (others.length === 0) {
+                const empty = document.createElement('li');
+                empty.className = 'no-users';
+                empty.textContent = 'No other users online.';
+                userListElement.appendChild(empty);
+                return;
             }
+
+            others.forEach(function(usernameInList) {
+                const status = userList[usernameInList];
+                const li = document.createElement('li');
+                li.dataset.username = usernameInList;
+
+                const dot = document.createElement('span');
+                dot.className = 'status-dot ' + status;
+                li.appendChild(dot);
+
+                const name = document.createElement('span');
+                name.textContent = usernameInList;
+                li.appendChild(name);
+
+                li.addEventListener('click', function() {
+                    selectRecipient(usernameInList);
+                });
+
+                if (selectedRecipient === usernameInList) {
+                    li.classList.add('selected');
+                }
+                userListElement.appendChild(li);
+            });
+        }
+
+        function selectRecipient(recipient) {
+            selectedRecipient = recipient;
+            document.getElementById('privateIndicator').innerHTML =
+                '\u{1F512} Private with <strong>' + recipient + '</strong>';
+            document.getElementById('clearPrivateBtn').style.display = 'inline-block';
+
+            document.querySelectorAll('#userList li').forEach(function(li) {
+                li.classList.toggle('selected', li.dataset.username === recipient);
+            });
+        }
+
+        function clearPrivate() {
+            selectedRecipient = null;
+            document.getElementById('privateIndicator').textContent = 'Public chat';
+            document.getElementById('clearPrivateBtn').style.display = 'none';
+            document.querySelectorAll('#userList li').forEach(li => li.classList.remove('selected'));
         }
 
         function startTyping() {
             if (!typingTimer) {
                 socket.emit('typing', { username: username, room: roomName });
-                typingTimer = setTimeout(stoppedTyping, TYPING_INTERVAL);
-            } else {
-                clearTimeout(typingTimer);
-                typingTimer = setTimeout(stoppedTyping, TYPING_INTERVAL);
             }
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(stoppedTyping, TYPING_INTERVAL);
         }
 
         function stoppedTyping() {
@@ -137,44 +217,37 @@
         }
 
         function displayTypingIndicator(user) {
-            const typingIndicator = document.getElementById('typingIndicator');
-            typingIndicator.textContent = user + ' is typing...';
+            document.getElementById('typingIndicator').textContent = user + ' is typing\u2026';
         }
 
-        function clearTypingIndicator(user) {
-            const typingIndicator = document.getElementById('typingIndicator');
-            typingIndicator.textContent = '';
+        function clearTypingIndicator() {
+            document.getElementById('typingIndicator').textContent = '';
         }
-
-        function selectRecipient(recipient) {
-            selectedRecipient = recipient;
-            document.getElementById('privateIndicator').textContent = 'Private message with ' + recipient;
-
-            const allUsers = document.querySelectorAll('#userList li');
-            allUsers.forEach(function(userItem) {
-                userItem.classList.remove('selected');
-                if (userItem.dataset.username === recipient) {
-                    userItem.classList.add('selected');
-                }
-            });
-        }
-
-        window.onload = function() {
-            const messagesList = document.getElementById('messages');
-            messagesList.scrollTop = messagesList.scrollHeight;
-        };
 
         function quitChat() {
             socket.emit('quit_chat', { username: username });
             window.location.href = '/';
         }
-
     </script>
 </head>
 <body class="chat-page">
+
+    <!-- Room Entry Modal — replaces browser prompt() -->
+    <div id="roomModal" class="modal-overlay" style="display:none;">
+        <div class="modal-card">
+            <p class="eyebrow">Step 2 of 2</p>
+            <h2>Choose a Room</h2>
+            <p class="subtitle">Enter an existing room name or create a new one.</p>
+            <label for="roomInput">Room Name</label>
+            <input type="text" id="roomInput" placeholder="e.g. general" autocomplete="off" maxlength="50" />
+            <p id="roomInputError" class="field-error"></p>
+            <button onclick="joinFromModal()">Join Room</button>
+        </div>
+    </div>
+
     <header class="chat-header">
         <div>
-            <p class="eyebrow">Connected as <span id="usernameDisplay"></span></p>
+            <p class="eyebrow">Connected as <strong id="usernameDisplay"></strong></p>
             <h1>Chat Room</h1>
         </div>
         <div class="room-pill">Room: <span id="roomNameDisplay">—</span></div>
@@ -183,13 +256,16 @@
     <div id="chatContainer">
         <aside class="panel users-panel">
             <h2>Online Users</h2>
-            <p class="panel-note">Select a user to send a private message.</p>
+            <p class="panel-note">Click a user to send a private message.</p>
             <ul id="userList"></ul>
         </aside>
 
         <section id="chatBox" class="panel">
             <div class="chat-toolbar">
-                <div id="privateIndicator">Public chat</div>
+                <div class="toolbar-left">
+                    <span id="privateIndicator">Public chat</span>
+                    <button id="clearPrivateBtn" class="clear-btn" onclick="clearPrivate()" style="display:none;">✕ Clear</button>
+                </div>
                 <button id="quitButton" onclick="quitChat()">Quit</button>
             </div>
 
@@ -200,17 +276,14 @@
                 <input
                     type="text"
                     id="messageInput"
-                    placeholder="Write a message..."
+                    placeholder="Write a message… (Enter to send)"
                     oninput="startTyping()"
-                    onkeydown="if (event.keyCode == 13) { sendMessage(); return false; }"
+                    onkeydown="if(event.key==='Enter'){sendMessage();return false;}"
+                    maxlength="2000"
                 />
                 <button id="sendButton" onclick="sendMessage()">Send</button>
             </div>
         </section>
     </div>
-
-    <script>
-        document.getElementById('usernameDisplay').textContent = new URLSearchParams(window.location.search).get('username') || 'guest';
-    </script>
 </body>
 </html>
