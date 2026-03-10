@@ -3,272 +3,61 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Chat Room | Chat Site</title>
+    <title>Chat | Chat Site</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
-    <script>
-        var socket = io();
-        let username;
-        let roomName;
-        let typingTimer;
-        const TYPING_INTERVAL = 800;
-        let selectedRecipient = null;
-
-        // --- Room Entry Modal ---
-        function openRoomModal() {
-            document.getElementById('roomModal').style.display = 'flex';
-            document.getElementById('roomInput').focus();
-        }
-
-        function joinFromModal() {
-            const roomInput = document.getElementById('roomInput');
-            const room = roomInput.value.trim();
-            if (!room) {
-                document.getElementById('roomInputError').textContent = 'Please enter a room name.';
-                return;
-            }
-            if (room.length > 50) {
-                document.getElementById('roomInputError').textContent = 'Room name must be 50 characters or fewer.';
-                return;
-            }
-            document.getElementById('roomModal').style.display = 'none';
-            roomName = room;
-            document.getElementById('roomNameDisplay').textContent = roomName;
-            socket.emit('join_room', { username: username, room: roomName });
-        }
-
-        document.addEventListener('keydown', function(e) {
-            const modal = document.getElementById('roomModal');
-            if (modal && modal.style.display === 'flex' && e.key === 'Enter') {
-                e.preventDefault();
-                joinFromModal();
-            }
-        });
-
-        // --- Socket Events ---
-        socket.on('connect', function() {
-            console.log('Connected!');
-            const urlParams = new URLSearchParams(window.location.search);
-            username = urlParams.get('username');
-            // FIX: Set username display properly on connect
-            document.getElementById('usernameDisplay').textContent = username || 'guest';
-            sessionStorage.setItem('chatUsername', username);
-            openRoomModal();
-        });
-
-        socket.on('disconnect', function() {
-            console.log('Disconnected from server.');
-        });
-
-        socket.on('room_error', function(data) {
-            document.getElementById('roomInputError').textContent = data.error || 'Room error.';
-            openRoomModal();
-        });
-
-        socket.on('new_message', function(data) {
-            displayMessage(data.sender, data.message, data.private, data.recipient);
-        });
-
-        socket.on('user_list_update', function(userList) {
-            updateUserList(userList);
-        });
-
-        socket.on('typing', function(data) {
-            displayTypingIndicator(data.username);
-        });
-
-        socket.on('stopped_typing', function(data) {
-            clearTypingIndicator();
-        });
-
-        // --- Messaging ---
-        function sendMessage() {
-            const messageInput = document.getElementById('messageInput');
-            const message = messageInput.value.trim();
-            if (!message || !username || !roomName) return;
-            if (message.length > 2000) {
-                alert('Message is too long (max 2000 characters).');
-                return;
-            }
-
-            if (selectedRecipient) {
-                socket.emit('send_message', {
-                    message: message,
-                    room: roomName,
-                    recipient: selectedRecipient,
-                    private: true
-                });
-            } else {
-                socket.emit('send_message', { message: message, room: roomName, private: false });
-            }
-            messageInput.value = '';
-            stoppedTyping();
-        }
-
-        function displayMessage(sender, message, isPrivate, recipient) {
-            const messagesList = document.getElementById('messages');
-            const li = document.createElement('li');
-
-            const header = document.createElement('div');
-            header.className = 'msg-header';
-
-            const senderLabel = document.createElement('span');
-            senderLabel.className = 'msg-sender';
-            senderLabel.textContent = sender;
-
-            header.appendChild(senderLabel);
-
-            if (isPrivate) {
-                const badge = document.createElement('span');
-                badge.className = 'private-badge';
-                badge.textContent = recipient ? '\u{1F512} to ' + recipient : '\u{1F512} private';
-                header.appendChild(badge);
-            }
-
-            const messageBody = document.createElement('div');
-            messageBody.className = 'msg-body';
-            messageBody.innerHTML = message;
-
-            li.appendChild(header);
-            li.appendChild(messageBody);
-
-            const me = sessionStorage.getItem('chatUsername');
-            if (sender === me) {
-                li.classList.add('sent');
-            } else if (sender === 'System') {
-                li.classList.add('system');
-            } else {
-                li.classList.add('received');
-            }
-
-            if (isPrivate) li.classList.add('private');
-
-            messagesList.appendChild(li);
-            messagesList.scrollTop = messagesList.scrollHeight;
-        }
-
-        function updateUserList(userList) {
-            const userListElement = document.getElementById('userList');
-            userListElement.innerHTML = '';
-
-            const others = Object.keys(userList).filter(u => u !== username);
-            if (others.length === 0) {
-                const empty = document.createElement('li');
-                empty.className = 'no-users';
-                empty.textContent = 'No other users online.';
-                userListElement.appendChild(empty);
-                return;
-            }
-
-            others.forEach(function(usernameInList) {
-                const status = userList[usernameInList];
-                const li = document.createElement('li');
-                li.dataset.username = usernameInList;
-
-                const dot = document.createElement('span');
-                dot.className = 'status-dot ' + status;
-                li.appendChild(dot);
-
-                const name = document.createElement('span');
-                name.textContent = usernameInList;
-                li.appendChild(name);
-
-                li.addEventListener('click', function() {
-                    selectRecipient(usernameInList);
-                });
-
-                if (selectedRecipient === usernameInList) {
-                    li.classList.add('selected');
-                }
-                userListElement.appendChild(li);
-            });
-        }
-
-        function selectRecipient(recipient) {
-            selectedRecipient = recipient;
-            document.getElementById('privateIndicator').innerHTML =
-                '\u{1F512} Private with <strong>' + recipient + '</strong>';
-            document.getElementById('clearPrivateBtn').style.display = 'inline-block';
-
-            document.querySelectorAll('#userList li').forEach(function(li) {
-                li.classList.toggle('selected', li.dataset.username === recipient);
-            });
-        }
-
-        function clearPrivate() {
-            selectedRecipient = null;
-            document.getElementById('privateIndicator').textContent = 'Public chat';
-            document.getElementById('clearPrivateBtn').style.display = 'none';
-            document.querySelectorAll('#userList li').forEach(li => li.classList.remove('selected'));
-        }
-
-        function startTyping() {
-            if (!typingTimer) {
-                socket.emit('typing', { username: username, room: roomName });
-            }
-            clearTimeout(typingTimer);
-            typingTimer = setTimeout(stoppedTyping, TYPING_INTERVAL);
-        }
-
-        function stoppedTyping() {
-            clearTimeout(typingTimer);
-            typingTimer = null;
-            socket.emit('stopped_typing', { username: username, room: roomName });
-        }
-
-        function displayTypingIndicator(user) {
-            document.getElementById('typingIndicator').textContent = user + ' is typing\u2026';
-        }
-
-        function clearTypingIndicator() {
-            document.getElementById('typingIndicator').textContent = '';
-        }
-
-        function quitChat() {
-            socket.emit('quit_chat', { username: username });
-            window.location.href = '/';
-        }
-    </script>
 </head>
 <body class="chat-page">
 
-    <!-- Room Entry Modal — replaces browser prompt() -->
-    <div id="roomModal" class="modal-overlay" style="display:none;">
+    <!-- Room Entry Modal -->
+    <div id="roomModal" class="modal-overlay">
         <div class="modal-card">
-            <p class="eyebrow">Step 2 of 2</p>
-            <h2>Choose a Room</h2>
-            <p class="subtitle">Enter an existing room name or create a new one.</p>
+            <p class="eyebrow">Join a Room</p>
+            <h2>Where do you want to chat?</h2>
+            <p class="subtitle">Enter an existing room name or make up a new one.</p>
             <label for="roomInput">Room Name</label>
             <input type="text" id="roomInput" placeholder="e.g. general" autocomplete="off" maxlength="50" />
             <p id="roomInputError" class="field-error"></p>
-            <button onclick="joinFromModal()">Join Room</button>
+            <button onclick="joinFromModal()" class="primary-btn">Join Room</button>
         </div>
     </div>
 
     <header class="chat-header">
-        <div>
-            <p class="eyebrow">Connected as <strong id="usernameDisplay"></strong></p>
-            <h1>Chat Room</h1>
+        <div class="header-left">
+            <p class="eyebrow">Signed in as <strong>{{ username }}</strong></p>
+            <h1>Chat Site</h1>
         </div>
-        <div class="room-pill">Room: <span id="roomNameDisplay">—</span></div>
+        <div class="header-right">
+            <div class="room-pill" id="roomPill">No room</div>
+            <a href="/logout" class="logout-btn">Sign out</a>
+        </div>
     </header>
 
     <div id="chatContainer">
+        <!-- Users sidebar -->
         <aside class="panel users-panel">
-            <h2>Online Users</h2>
-            <p class="panel-note">Click a user to send a private message.</p>
+            <h2>Online <span id="userCount" class="count-badge">0</span></h2>
+            <p class="panel-note">Click a user for a private message.</p>
             <ul id="userList"></ul>
         </aside>
 
+        <!-- Main chat -->
         <section id="chatBox" class="panel">
             <div class="chat-toolbar">
                 <div class="toolbar-left">
                     <span id="privateIndicator">Public chat</span>
                     <button id="clearPrivateBtn" class="clear-btn" onclick="clearPrivate()" style="display:none;">✕ Clear</button>
                 </div>
-                <button id="quitButton" onclick="quitChat()">Quit</button>
+                <div class="toolbar-right">
+                    <!-- Media upload -->
+                    <label for="mediaInput" class="icon-btn" title="Send photo or video">
+                        📎
+                        <input type="file" id="mediaInput" accept="image/*,video/*" style="display:none;" onchange="handleMediaSelect(event)" />
+                    </label>
+                </div>
             </div>
 
+            <!-- History separator will be inserted here by JS -->
             <ul id="messages"></ul>
             <div id="typingIndicator"></div>
 
@@ -280,10 +69,444 @@
                     oninput="startTyping()"
                     onkeydown="if(event.key==='Enter'){sendMessage();return false;}"
                     maxlength="2000"
+                    autocomplete="off"
                 />
                 <button id="sendButton" onclick="sendMessage()">Send</button>
             </div>
         </section>
     </div>
+
+    <!-- Media preview modal -->
+    <div id="mediaModal" class="modal-overlay" style="display:none;" onclick="closeMediaModal()">
+        <div class="media-modal-inner" onclick="event.stopPropagation()">
+            <button class="modal-close" onclick="closeMediaModal()">✕</button>
+            <div id="mediaModalContent"></div>
+            <p class="media-warning">⚠️ This media disappears once you close this view.</p>
+        </div>
+    </div>
+
+    <!-- Upload progress overlay -->
+    <div id="uploadOverlay" style="display:none;">
+        <div class="upload-box">
+            <div class="upload-spinner"></div>
+            <p id="uploadStatus">Uploading…</p>
+        </div>
+    </div>
+
+    <script>
+        const USERNAME = "{{ username }}";
+        const socket   = io();
+
+        let roomName         = null;
+        let selectedRecipient = null;
+        let typingTimer      = null;
+        const TYPING_INTERVAL = 800;
+        const typingUsers     = new Set();
+
+        // ── Room modal ─────────────────────────────────────────────────────────
+
+        function joinFromModal() {
+            const room = document.getElementById('roomInput').value.trim();
+            if (!room) { document.getElementById('roomInputError').textContent = 'Please enter a room name.'; return; }
+            if (room.length > 50) { document.getElementById('roomInputError').textContent = 'Max 50 characters.'; return; }
+            document.getElementById('roomModal').style.display = 'none';
+            roomName = room;
+            document.getElementById('roomPill').textContent = '# ' + roomName;
+            socket.emit('join_room', { room: roomName });
+        }
+
+        document.getElementById('roomInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); joinFromModal(); }
+        });
+
+        // ── Socket events ──────────────────────────────────────────────────────
+
+        socket.on('connect', function() {
+            console.log('Connected');
+        });
+
+        socket.on('disconnect', function() {
+            appendSystem('Disconnected from server. Please refresh.');
+        });
+
+        socket.on('room_error', function(data) {
+            document.getElementById('roomInputError').textContent = data.error;
+            document.getElementById('roomModal').style.display = 'flex';
+        });
+
+        socket.on('new_message', function(data) {
+            displayMessage(data);
+        });
+
+        socket.on('new_media', function(data) {
+            displayMedia(data);
+        });
+
+        socket.on('message_history', function(data) {
+            const msgs = data.messages;
+            if (!msgs || msgs.length === 0) return;
+            appendHistorySeparator(data.context === 'dm' ? `Last 5 DMs with ${data.with}` : 'Last 5 messages');
+            msgs.forEach(m => {
+                if (m.media_token) { displayMedia(m, true); }
+                else               { displayMessage(m, true); }
+            });
+            appendHistorySeparator('— now —');
+        });
+
+        socket.on('user_list_update', function(userList) {
+            updateUserList(userList);
+        });
+
+        socket.on('typing', function(data) {
+            typingUsers.add(data.username);
+            renderTyping();
+        });
+
+        socket.on('stopped_typing', function(data) {
+            typingUsers.delete(data.username);
+            renderTyping();
+        });
+
+        socket.on('media_viewed', function(data) {
+            // Mark sent media bubble as viewed
+            const el = document.querySelector(`[data-token="${data.token}"]`);
+            if (el) {
+                el.classList.add('media-viewed');
+                const note = el.querySelector('.media-viewed-note');
+                if (note) note.textContent = '✓ Viewed & deleted';
+            }
+        });
+
+        socket.on('upload_error', function(data) {
+            hideUploadOverlay();
+            alert('Upload failed: ' + data.error);
+        });
+
+        // ── Messaging ──────────────────────────────────────────────────────────
+
+        function sendMessage() {
+            const input   = document.getElementById('messageInput');
+            const message = input.value.trim();
+            if (!message || !roomName) return;
+
+            const payload = { message, room: roomName, private: !!selectedRecipient };
+            if (selectedRecipient) payload.recipient = selectedRecipient;
+            socket.emit('send_message', payload);
+            input.value = '';
+            stoppedTyping();
+        }
+
+        function displayMessage(data, isHistory = false) {
+            const list = document.getElementById('messages');
+            const li   = document.createElement('li');
+
+            if (data.sender === 'System') {
+                li.className = 'system';
+                li.textContent = data.message.replace(/<[^>]*>/g, '');
+                list.appendChild(li);
+                scrollBottom();
+                return;
+            }
+
+            const isMine = data.sender === USERNAME;
+            li.classList.add(isMine ? 'sent' : 'received');
+            if (data.private) li.classList.add('private');
+
+            const header = document.createElement('div');
+            header.className = 'msg-header';
+
+            const senderEl = document.createElement('span');
+            senderEl.className = 'msg-sender';
+            senderEl.textContent = isMine ? 'You' : data.sender;
+            header.appendChild(senderEl);
+
+            if (data.private) {
+                const badge = document.createElement('span');
+                badge.className = 'private-badge';
+                badge.textContent = isMine ? `🔒 → ${data.recipient}` : '🔒 private';
+                header.appendChild(badge);
+            }
+
+            if (data.timestamp) {
+                const ts = document.createElement('span');
+                ts.className = 'msg-ts';
+                ts.textContent = data.timestamp;
+                header.appendChild(ts);
+            }
+
+            const body = document.createElement('div');
+            body.className = 'msg-body';
+            body.innerHTML = data.message;
+
+            li.appendChild(header);
+            li.appendChild(body);
+            list.appendChild(li);
+            scrollBottom();
+        }
+
+        function displayMedia(data, isHistory = false) {
+            const list   = document.getElementById('messages');
+            const li     = document.createElement('li');
+            const isMine = data.sender === USERNAME;
+
+            li.classList.add(isMine ? 'sent' : 'received', 'media-bubble');
+            if (data.private) li.classList.add('private');
+            li.dataset.token = data.media_token;
+
+            const header = document.createElement('div');
+            header.className = 'msg-header';
+            const senderEl = document.createElement('span');
+            senderEl.className = 'msg-sender';
+            senderEl.textContent = isMine ? 'You' : data.sender;
+            header.appendChild(senderEl);
+
+            if (data.private) {
+                const badge = document.createElement('span');
+                badge.className = 'private-badge';
+                badge.textContent = isMine ? `🔒 → ${data.recipient}` : '🔒 private';
+                header.appendChild(badge);
+            }
+
+            if (data.timestamp) {
+                const ts = document.createElement('span');
+                ts.className = 'msg-ts';
+                ts.textContent = data.timestamp;
+                header.appendChild(ts);
+            }
+
+            const body = document.createElement('div');
+            body.className = 'msg-body media-body';
+
+            const isVideo = data.mimetype && data.mimetype.startsWith('video/');
+
+            if (isMine) {
+                // Sender sees a placeholder — they can't re-view it
+                const placeholder = document.createElement('div');
+                placeholder.className = 'media-sent-placeholder';
+                placeholder.innerHTML = isVideo ? '🎬 Video sent' : '🖼️ Photo sent';
+                const note = document.createElement('div');
+                note.className = 'media-viewed-note';
+                note.textContent = 'Waiting for recipient to view…';
+                body.appendChild(placeholder);
+                body.appendChild(note);
+            } else {
+                // Recipient sees a tap-to-view button
+                const btn = document.createElement('button');
+                btn.className = 'view-media-btn';
+                btn.innerHTML = isVideo ? '▶ Tap to view video' : '👁 Tap to view photo';
+                btn.onclick = function() { openMedia(data.media_token, data.mimetype, li); };
+                body.appendChild(btn);
+                const warn = document.createElement('p');
+                warn.className = 'media-disappear-hint';
+                warn.textContent = '⚠️ Disappears after viewing';
+                body.appendChild(warn);
+            }
+
+            li.appendChild(header);
+            li.appendChild(body);
+            list.appendChild(li);
+            scrollBottom();
+        }
+
+        function openMedia(token, mimetype, bubbleEl) {
+            const modal   = document.getElementById('mediaModal');
+            const content = document.getElementById('mediaModalContent');
+            content.innerHTML = '';
+
+            const url = `/media/${token}`;
+
+            if (mimetype.startsWith('video/')) {
+                const vid = document.createElement('video');
+                vid.src      = url;
+                vid.controls = true;
+                vid.autoplay = true;
+                vid.style.maxWidth  = '100%';
+                vid.style.maxHeight = '70vh';
+                content.appendChild(vid);
+            } else {
+                const img = document.createElement('img');
+                img.src   = url;
+                img.style.maxWidth  = '100%';
+                img.style.maxHeight = '70vh';
+                img.style.borderRadius = '10px';
+                content.appendChild(img);
+            }
+
+            modal.style.display = 'flex';
+
+            // Replace the tap button with a "viewed" notice on the bubble
+            if (bubbleEl) {
+                const btn = bubbleEl.querySelector('.view-media-btn');
+                const hint = bubbleEl.querySelector('.media-disappear-hint');
+                if (btn)  btn.remove();
+                if (hint) hint.remove();
+                const viewed = document.createElement('p');
+                viewed.className = 'media-viewed-note';
+                viewed.textContent = '✓ Viewed — media deleted';
+                const body = bubbleEl.querySelector('.msg-body');
+                if (body) body.appendChild(viewed);
+            }
+        }
+
+        function closeMediaModal() {
+            const modal   = document.getElementById('mediaModal');
+            const content = document.getElementById('mediaModalContent');
+            modal.style.display = 'none';
+            content.innerHTML   = ''; // Release video/image from memory
+        }
+
+        // ── Media upload ───────────────────────────────────────────────────────
+
+        function handleMediaSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const allowedTypes = [
+                'image/jpeg','image/png','image/gif','image/webp',
+                'video/mp4','video/webm','video/quicktime'
+            ];
+            if (!allowedTypes.includes(file.type)) {
+                alert('Unsupported file type. Please use JPEG, PNG, GIF, WebP, MP4, WebM, or MOV.');
+                return;
+            }
+            if (file.size > 50 * 1024 * 1024) {
+                alert('File exceeds 50 MB limit.');
+                return;
+            }
+
+            showUploadOverlay(file.name);
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                // Strip the data:mimetype;base64, prefix
+                const b64 = e.target.result.split(',')[1];
+                const payload = {
+                    data:     b64,
+                    mimetype: file.type,
+                    room:     roomName,
+                    private:  !!selectedRecipient,
+                };
+                if (selectedRecipient) payload.recipient = selectedRecipient;
+                socket.emit('send_media', payload);
+                hideUploadOverlay();
+            };
+            reader.onerror = function() {
+                hideUploadOverlay();
+                alert('Failed to read file.');
+            };
+            reader.readAsDataURL(file);
+
+            // Reset input so same file can be re-selected
+            event.target.value = '';
+        }
+
+        function showUploadOverlay(name) {
+            document.getElementById('uploadStatus').textContent = `Uploading ${name}…`;
+            document.getElementById('uploadOverlay').style.display = 'flex';
+        }
+        function hideUploadOverlay() {
+            document.getElementById('uploadOverlay').style.display = 'none';
+        }
+
+        // ── User list ──────────────────────────────────────────────────────────
+
+        function updateUserList(userList) {
+            const ul     = document.getElementById('userList');
+            const others = Object.keys(userList).filter(u => u !== USERNAME);
+            document.getElementById('userCount').textContent = others.length;
+            ul.innerHTML = '';
+
+            if (others.length === 0) {
+                const li = document.createElement('li');
+                li.className  = 'no-users';
+                li.textContent = 'No other users online.';
+                ul.appendChild(li);
+                return;
+            }
+
+            others.forEach(function(uname) {
+                const li  = document.createElement('li');
+                li.dataset.username = uname;
+
+                const dot = document.createElement('span');
+                dot.className = 'status-dot online';
+                li.appendChild(dot);
+
+                const name = document.createElement('span');
+                name.textContent = uname;
+                li.appendChild(name);
+
+                if (selectedRecipient === uname) li.classList.add('selected');
+
+                li.addEventListener('click', function() {
+                    selectRecipient(uname);
+                    socket.emit('request_dm_history', { with: uname });
+                });
+
+                ul.appendChild(li);
+            });
+        }
+
+        function selectRecipient(recipient) {
+            selectedRecipient = recipient;
+            document.getElementById('privateIndicator').innerHTML =
+                `🔒 Private with <strong>${recipient}</strong>`;
+            document.getElementById('clearPrivateBtn').style.display = 'inline-block';
+            document.querySelectorAll('#userList li').forEach(li =>
+                li.classList.toggle('selected', li.dataset.username === recipient));
+        }
+
+        function clearPrivate() {
+            selectedRecipient = null;
+            document.getElementById('privateIndicator').textContent = 'Public chat';
+            document.getElementById('clearPrivateBtn').style.display = 'none';
+            document.querySelectorAll('#userList li').forEach(li => li.classList.remove('selected'));
+        }
+
+        // ── Typing ─────────────────────────────────────────────────────────────
+
+        function startTyping() {
+            if (!typingTimer) socket.emit('typing', { room: roomName });
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(stoppedTyping, TYPING_INTERVAL);
+        }
+
+        function stoppedTyping() {
+            clearTimeout(typingTimer);
+            typingTimer = null;
+            socket.emit('stopped_typing', { room: roomName });
+        }
+
+        function renderTyping() {
+            const el = document.getElementById('typingIndicator');
+            const users = [...typingUsers];
+            if (users.length === 0)      el.textContent = '';
+            else if (users.length === 1) el.textContent = users[0] + ' is typing…';
+            else if (users.length === 2) el.textContent = users.join(' and ') + ' are typing…';
+            else                         el.textContent = users.slice(0,-1).join(', ') + ' and ' + users.at(-1) + ' are typing…';
+        }
+
+        // ── Helpers ────────────────────────────────────────────────────────────
+
+        function appendSystem(text) {
+            const li = document.createElement('li');
+            li.className   = 'system';
+            li.textContent = text;
+            document.getElementById('messages').appendChild(li);
+            scrollBottom();
+        }
+
+        function appendHistorySeparator(label) {
+            const li = document.createElement('li');
+            li.className   = 'history-sep';
+            li.textContent = label;
+            document.getElementById('messages').appendChild(li);
+        }
+
+        function scrollBottom() {
+            const list = document.getElementById('messages');
+            list.scrollTop = list.scrollHeight;
+        }
+    </script>
 </body>
 </html>
